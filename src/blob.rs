@@ -7,6 +7,7 @@ use thiserror::Error;
 
 use crate::input::Input;
 
+#[derive(Clone)]
 pub struct Blob {
     pub byte_size: u64,
     pub start: u64,
@@ -40,6 +41,10 @@ impl Blob {
     }
 
     pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), BlobError> {
+        if self.length <= 0 {
+            return Ok(());
+        }
+
         writer.write_all(&self.byte_size.to_le_bytes())?;
         writer.write_all(&self.start.to_le_bytes())?;
         writer.write_all(&self.length.to_le_bytes())?;

@@ -94,6 +94,20 @@ impl Input {
         state | (self.delta << 5)
     }
 
+    pub const fn required_bytes(&self) -> u8 {
+        if let InputData::TPS(_) = self.data {
+            return 8;
+        }
+
+        let state = self.to_state();
+        match state {
+            0..0x100 => 1,
+            0x100..0x10000 => 2,
+            0x10000..0x100000000 => 4,
+            _ => 8,
+        }
+    }
+
     pub fn write<W: Write>(&self, writer: &mut W, byte_size: u64) -> Result<(), InputError> {
         writer.write_all(&self.to_state().to_le_bytes()[0..byte_size as usize])?;
         if let InputData::TPS(tps) = self.data {
