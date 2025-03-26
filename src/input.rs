@@ -1,4 +1,7 @@
-use std::io::{Read, Write};
+use std::{
+    fmt::Display,
+    io::{Read, Write},
+};
 
 use thiserror::Error;
 
@@ -17,10 +20,33 @@ pub enum InputData {
     TPS(f64),
 }
 
+impl Display for InputData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InputData::Skip => write!(f, "skip"),
+            Self::Player(p) => write!(
+                f,
+                "button: {}, hold: {}, p2: {}",
+                p.button, p.hold, p.player_2
+            ),
+            Self::Death => write!(f, "death"),
+            Self::Restart => write!(f, "restart"),
+            Self::RestartFull => write!(f, "full restart"),
+            Self::TPS(tps) => write!(f, "tps: {}", tps),
+        }
+    }
+}
+
 pub struct Input {
-    delta: u64,
+    pub(crate) delta: u64,
     pub frame: u64,
     pub data: InputData,
+}
+
+impl Display for Input {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "frame: {}, input: {}", self.frame, self.data)
+    }
 }
 
 // IO

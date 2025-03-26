@@ -7,7 +7,6 @@ use thiserror::Error;
 
 use crate::input::Input;
 
-#[derive(Clone)]
 pub struct Blob {
     pub byte_size: u64,
     pub start: u64,

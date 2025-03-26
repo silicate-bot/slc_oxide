@@ -6,7 +6,11 @@ use std::{
 use itertools::Itertools;
 use thiserror::Error;
 
-use crate::{blob::Blob, input::Input, meta::Meta};
+use crate::{
+    blob::Blob,
+    input::{Input, InputData},
+    meta::Meta,
+};
 
 pub struct Replay<M: Meta> {
     pub tps: f64,
@@ -32,6 +36,34 @@ pub enum ReplayError {
 impl<M: Meta> Replay<M> {
     const HEADER: [u8; 4] = [0x53, 0x49, 0x4C, 0x4C]; // SILL
     const FOOTER: [u8; 3] = [0x45, 0x4F, 0x4D]; // EOM
+
+    pub fn new(tps: f64, meta: M) -> Self {
+        Self {
+            tps,
+            meta,
+            inputs: vec![],
+        }
+    }
+
+    pub fn add_input(&mut self, frame: u64, data: InputData) {
+        if self.inputs.is_empty() {
+            self.inputs.push(Input {
+                frame,
+                delta: frame,
+                data,
+            });
+
+            return;
+        }
+
+        let last_input = self.inputs.last().expect("Input should exist");
+
+        self.inputs.push(Input {
+            frame,
+            delta: frame - last_input.frame,
+            data,
+        })
+    }
 
     pub fn read<R: Read>(reader: &mut R) -> Result<Self, ReplayError> {
         let mut header_buf = [0u8; 4];
@@ -95,7 +127,6 @@ impl<M: Meta> Replay<M> {
         // First blob pass
         self.inputs.iter().enumerate().for_each(|(i, input)| {
             let byte_size = input.required_bytes();
-
             if blobs.is_empty() {
                 blobs.push(Blob {
                     byte_size: byte_size as u64,
@@ -127,11 +158,13 @@ impl<M: Meta> Replay<M> {
         let mut zero_sized_blobs = 0;
 
         // Second blob pass
-        (0..blobs.len()).tuple_windows().for_each(|(i, j)| {
-            let [previous, blob] = blobs.get_disjoint_mut([i, j]).expect("Blob should exist");
+        for i in (1..blobs.len()).rev() {
+            let [previous, blob] = blobs
+                .get_disjoint_mut([i - 1, i])
+                .expect("Blob should exist");
 
             let blob_size = blob.byte_size * blob.length;
-            const BLOB_MEM_SIZE: u64 = std::mem::size_of::<Blob>() as u64;
+            const BLOB_MEM_SIZE: u64 = 24;
 
             if blob_size < BLOB_MEM_SIZE {
                 if blob.byte_size > previous.byte_size
@@ -141,14 +174,14 @@ impl<M: Meta> Replay<M> {
                     previous.byte_size = blob.byte_size;
                     blob.length = 0;
                     zero_sized_blobs += 1;
-                    return;
+                    continue;
                 } else if blob.byte_size < previous.byte_size
                     && (previous.byte_size * blob.length) < BLOB_MEM_SIZE
                 {
                     previous.length += blob.length;
                     blob.length = 0;
                     zero_sized_blobs += 1;
-                    return;
+                    continue;
                 }
             }
 
@@ -157,7 +190,7 @@ impl<M: Meta> Replay<M> {
                 blob.length = 0;
                 zero_sized_blobs += 1;
             }
-        });
+        }
 
         let blob_length: u64 = blobs.len() as u64 - zero_sized_blobs;
         writer.write_all(&blob_length.to_le_bytes())?;
