@@ -3,7 +3,6 @@ use std::{
     io::{Read, Write},
 };
 
-use itertools::Itertools;
 use thiserror::Error;
 
 use crate::{
@@ -12,6 +11,48 @@ use crate::{
     meta::Meta,
 };
 
+/// An slc replay.
+///
+/// This replay format is designed to be small, while still efficiently parsing replays.
+///
+/// You may specify your own custom meta through the `M` generic type. See [`slc_oxide::meta::Meta`] for further details.
+///
+/// # Examples
+/// ```
+/// struct ReplayMeta {
+///   pub seed: u64
+/// }
+///
+/// let mut replay = Replay::<ReplayMeta>::new(
+///   240.0,
+///   ReplayMeta {
+///     seed: 1234
+///   }
+/// );
+///
+/// // OR
+///
+/// let mut replay = Replay::<()>::new(240.0, ()); // For no meta
+///
+/// // Set tps by directly changing the value
+/// replay.tps = 480.0;
+///
+/// // Add inputs using the `add_input` function
+/// replay.add_input(200, InputData::Player(PlayerData {
+///   button: 1,
+///   hold: true,
+///   player_2: false
+/// }));
+///
+/// // Other input types
+/// replay.add_input(400, InputData::Death);
+/// replay.add_input(600, InputData::TPS(480.0));
+///
+/// // Save the replay
+/// let file = File::open("replay.slc")?;
+/// let bw = BufWriter::new(file); // RECOMMENDED!
+/// replay.write(bw)?;
+/// ```
 pub struct Replay<M: Meta> {
     pub tps: f64,
     pub meta: M,
@@ -37,6 +78,7 @@ impl<M: Meta> Replay<M> {
     const HEADER: [u8; 4] = [0x53, 0x49, 0x4C, 0x4C]; // SILL
     const FOOTER: [u8; 3] = [0x45, 0x4F, 0x4D]; // EOM
 
+    /// Create a new slc replay with the specified tps and meta.
     pub fn new(tps: f64, meta: M) -> Self {
         Self {
             tps,
@@ -45,6 +87,7 @@ impl<M: Meta> Replay<M> {
         }
     }
 
+    /// Add a new input with the specified data to the replay.
     pub fn add_input(&mut self, frame: u64, data: InputData) {
         if self.inputs.is_empty() {
             self.inputs.push(Input {
@@ -65,6 +108,7 @@ impl<M: Meta> Replay<M> {
         })
     }
 
+    /// Read the replay from a stream.
     pub fn read<R: Read>(reader: &mut R) -> Result<Self, ReplayError> {
         let mut header_buf = [0u8; 4];
         reader.read_exact(&mut header_buf)?;
@@ -113,6 +157,7 @@ impl<M: Meta> Replay<M> {
         Ok(Self { tps, meta, inputs })
     }
 
+    /// Write the replay to a stream.
     pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), ReplayError> {
         writer.write_all(&Self::HEADER)?;
 

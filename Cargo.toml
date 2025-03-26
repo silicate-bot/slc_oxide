@@ -2,7 +2,11 @@
 name = "slc_oxide"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+description = "A tiny and fast replay format for Geometry Dash"
+readme = "README.md"
+repository = "https://github.com/silicate-bot/slc_oxide"
+keywords = ["game", "geode", "bot"]
 
 [dependencies]
-itertools = "0.14.0"
 thiserror = "2.0.12"

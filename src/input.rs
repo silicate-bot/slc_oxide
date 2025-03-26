@@ -5,18 +5,34 @@ use std::{
 
 use thiserror::Error;
 
+/// A player input.
+///
+/// This input assumes the following buttons:
+/// 1 - Jump
+/// 2 - Left
+/// 3 - Right
+///
+/// Buttons match the in-game buttons directly provided in `GJBaseGameLayer::handleButton`.
+/// You may safely use them without any further processing.
 pub struct PlayerInput {
     pub hold: bool,
     pub player_2: bool,
     pub button: u8,
 }
 
+/// Data specifying an input's action.
 pub enum InputData {
+    /// This input does nothing.
     Skip,
+    /// This input is an in-game player button push.
     Player(PlayerInput),
+    /// This input restarts the level. (`PlayLayer::resetLevel`)
     Restart,
+    /// This input restarts the level, fully. (`PlayLayer::fullReset`)
     RestartFull,
+    /// This input signals that the player may die on any subsequent frame.
     Death,
+    /// This input changes the current tps of the replay.
     TPS(f64),
 }
 
@@ -37,6 +53,10 @@ impl Display for InputData {
     }
 }
 
+/// A replay input.
+///
+/// Replay inputs are identified by the frame they're on. Do note
+/// that different bots count frames differently (e.g. using GJGameState's `m_currentProgress`).
 pub struct Input {
     pub(crate) delta: u64,
     pub frame: u64,
@@ -62,7 +82,7 @@ pub enum InputError {
 }
 
 impl Input {
-    pub fn read<R: Read>(
+    pub(crate) fn read<R: Read>(
         reader: &mut R,
         current_frame: u64,
         byte_size: usize,
@@ -120,7 +140,7 @@ impl Input {
         state | (self.delta << 5)
     }
 
-    pub const fn required_bytes(&self) -> u8 {
+    pub(crate) const fn required_bytes(&self) -> u8 {
         if let InputData::TPS(_) = self.data {
             return 8;
         }
@@ -134,7 +154,7 @@ impl Input {
         }
     }
 
-    pub fn write<W: Write>(&self, writer: &mut W, byte_size: u64) -> Result<(), InputError> {
+    pub(crate) fn write<W: Write>(&self, writer: &mut W, byte_size: u64) -> Result<(), InputError> {
         writer.write_all(&self.to_state().to_le_bytes()[0..byte_size as usize])?;
         if let InputData::TPS(tps) = self.data {
             writer.write_all(&tps.to_le_bytes())?;
