@@ -2,6 +2,8 @@
 
 A tiny and incredibly fast replay format for Geometry Dash.
 
+Requires Rust nightly, at least version `1.87.0`.
+
 ## Documentation
 
 For documentation, please refer to the [original slc repo](https://github.com/silicate-bot/slc).
