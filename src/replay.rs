@@ -192,12 +192,11 @@ impl<M: Meta> Replay<M> {
                         start: i as u64,
                         length: 1,
                     });
-                    return;
                 }
                 Ordering::Equal => {
                     blob.length += 1;
                 }
-            };
+            }
         });
 
         let mut zero_sized_blobs = 0;

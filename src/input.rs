@@ -91,9 +91,7 @@ impl Input {
         reader.read_exact(&mut buf)?;
         buf.resize(8, 0);
 
-        let state = u64::from_le_bytes(*unsafe {
-            std::mem::transmute::<*const u8, &[u8; 8]>(buf.as_ptr())
-        });
+        let state = u64::from_le_bytes(*unsafe { &*buf.as_ptr().cast::<[u8; 8]>() });
 
         let delta = state >> 5;
         let frame = current_frame + delta;
@@ -111,9 +109,7 @@ impl Input {
             6 => InputData::Death,
             7 => {
                 reader.read_exact(&mut buf)?;
-                let tps = f64::from_le_bytes(*unsafe {
-                    std::mem::transmute::<*const u8, &[u8; 8]>(buf.as_ptr())
-                });
+                let tps = f64::from_le_bytes(*unsafe { &*buf.as_ptr().cast::<[u8; 8]>() });
 
                 InputData::TPS(tps)
             }
