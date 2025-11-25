@@ -7,3 +7,10 @@ pub(crate) mod blob;
 pub mod input;
 pub mod meta;
 pub mod replay;
+pub mod v3;
+
+#[allow(deprecated)]
+pub use input::PlayerData;
+pub use input::{Input, InputData, PlayerInput};
+pub use meta::Meta;
+pub use replay::{Replay, ReplayError};

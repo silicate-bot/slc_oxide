@@ -14,13 +14,19 @@ use thiserror::Error;
 ///
 /// Buttons match the in-game buttons directly provided in `GJBaseGameLayer::handleButton`.
 /// You may safely use them without any further processing.
+#[derive(Debug, Clone, PartialEq)]
 pub struct PlayerInput {
     pub hold: bool,
     pub player_2: bool,
     pub button: u8,
 }
 
+/// Backwards compatibility alias for PlayerInput.
+#[deprecated(since = "0.2.0", note = "Use `PlayerInput` instead")]
+pub type PlayerData = PlayerInput;
+
 /// Data specifying an input's action.
+#[derive(Debug, Clone, PartialEq)]
 pub enum InputData {
     /// This input does nothing.
     Skip,
@@ -57,8 +63,9 @@ impl Display for InputData {
 ///
 /// Replay inputs are identified by the frame they're on. Do note
 /// that different bots count frames differently (e.g. using GJGameState's `m_currentProgress`).
+#[derive(Debug, Clone, PartialEq)]
 pub struct Input {
-    pub(crate) delta: u64,
+    pub delta: u64,
     pub frame: u64,
     pub data: InputData,
 }
@@ -91,9 +98,7 @@ impl Input {
         reader.read_exact(&mut buf)?;
         buf.resize(8, 0);
 
-        let state = u64::from_le_bytes(*unsafe {
-            std::mem::transmute::<*const u8, &[u8; 8]>(buf.as_ptr())
-        });
+        let state = u64::from_le_bytes(*unsafe { &*buf.as_ptr().cast::<[u8; 8]>() });
 
         let delta = state >> 5;
         let frame = current_frame + delta;
@@ -111,9 +116,7 @@ impl Input {
             6 => InputData::Death,
             7 => {
                 reader.read_exact(&mut buf)?;
-                let tps = f64::from_le_bytes(*unsafe {
-                    std::mem::transmute::<*const u8, &[u8; 8]>(buf.as_ptr())
-                });
+                let tps = f64::from_le_bytes(*unsafe { &*buf.as_ptr().cast::<[u8; 8]>() });
 
                 InputData::TPS(tps)
             }

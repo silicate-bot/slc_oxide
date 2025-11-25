@@ -1,7 +1,4 @@
-use std::{
-    io::{Read, Write},
-    u64,
-};
+use std::io::{Read, Write};
 
 use thiserror::Error;
 
@@ -40,7 +37,7 @@ impl Blob {
     }
 
     pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), BlobError> {
-        if self.length <= 0 {
+        if self.length == 0 {
             return Ok(());
         }
 
@@ -71,7 +68,7 @@ impl Blob {
         writer: &mut W,
         inputs: &[Input],
     ) -> Result<(), BlobError> {
-        if self.length <= 0 {
+        if self.length == 0 {
             return Ok(());
         }
 
