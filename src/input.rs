@@ -14,13 +14,19 @@ use thiserror::Error;
 ///
 /// Buttons match the in-game buttons directly provided in `GJBaseGameLayer::handleButton`.
 /// You may safely use them without any further processing.
+#[derive(Debug, Clone, PartialEq)]
 pub struct PlayerInput {
     pub hold: bool,
     pub player_2: bool,
     pub button: u8,
 }
 
+/// Backwards compatibility alias for PlayerInput.
+#[deprecated(since = "0.2.0", note = "Use `PlayerInput` instead")]
+pub type PlayerData = PlayerInput;
+
 /// Data specifying an input's action.
+#[derive(Debug, Clone, PartialEq)]
 pub enum InputData {
     /// This input does nothing.
     Skip,
@@ -57,8 +63,9 @@ impl Display for InputData {
 ///
 /// Replay inputs are identified by the frame they're on. Do note
 /// that different bots count frames differently (e.g. using GJGameState's `m_currentProgress`).
+#[derive(Debug, Clone, PartialEq)]
 pub struct Input {
-    pub(crate) delta: u64,
+    pub delta: u64,
     pub frame: u64,
     pub data: InputData,
 }
