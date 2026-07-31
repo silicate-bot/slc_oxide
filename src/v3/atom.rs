@@ -102,16 +102,17 @@ impl AtomVariant {
     }
 
     pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), AtomError> {
+        let mut body = Vec::new();
+        match self {
+            AtomVariant::Null(a) => a.write(&mut body)?,
+            AtomVariant::Action(a) => a.write(&mut body)?,
+        }
+
         let id = self.id() as u32;
         writer.write_all(&id.to_le_bytes())?;
-
-        let size = self.size() as u64;
+        let size = body.len() as u64;
         writer.write_all(&size.to_le_bytes())?;
-
-        match self {
-            AtomVariant::Null(a) => a.write(writer)?,
-            AtomVariant::Action(a) => a.write(writer)?,
-        }
+        writer.write_all(&body)?;
 
         Ok(())
     }
