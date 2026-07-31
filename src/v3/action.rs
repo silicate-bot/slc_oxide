@@ -9,6 +9,7 @@ pub enum ActionType {
     RestartFull = 5,
     Death = 6,
     TPS = 7,
+    Bugpoint = 8,
 }
 
 #[derive(Debug, Clone)]
@@ -64,6 +65,19 @@ impl Action {
             player2: false,
             seed: 0,
             tps,
+            swift: false,
+            delta,
+        }
+    }
+
+    pub fn bugpoint(current_frame: u64, delta: u64) -> Self {
+        Self {
+            frame: current_frame + delta,
+            action_type: ActionType::Bugpoint,
+            holding: false,
+            player2: false,
+            seed: 0,
+            tps: 240.0,
             swift: false,
             delta,
         }

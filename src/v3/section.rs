@@ -43,6 +43,7 @@ pub enum SpecialType {
     RestartFull = 1,
     Death = 2,
     TPS = 3,
+    Bugpoint = 4,
 }
 
 #[repr(u8)]
@@ -177,6 +178,7 @@ impl Section {
             ActionType::Death => SpecialType::Death,
             ActionType::Restart => SpecialType::Restart,
             ActionType::RestartFull => SpecialType::RestartFull,
+            ActionType::Bugpoint => SpecialType::Bugpoint,
             _ => return Err(SectionError::InvalidIdentifier),
         };
 
@@ -430,6 +432,7 @@ impl Section {
                     1 => SpecialType::RestartFull,
                     2 => SpecialType::Death,
                     3 => SpecialType::TPS,
+                    4 => SpecialType::Bugpoint,
                     _ => return Err(SectionError::InvalidIdentifier),
                 };
 
@@ -451,6 +454,9 @@ impl Section {
                             _ => ActionType::Restart,
                         };
                         actions.push(Action::death(current_frame, frame_delta, action_type, seed));
+                    }
+                    SpecialType::Bugpoint => {
+                        actions.push(Action::bugpoint(current_frame, frame_delta));
                     }
                 }
             }
@@ -504,6 +510,7 @@ impl Section {
                     SpecialType::TPS => {
                         writer.write_all(&self.tps.to_le_bytes())?;
                     }
+                    SpecialType::Bugpoint => {}
                 }
             }
         }

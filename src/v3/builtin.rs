@@ -57,6 +57,13 @@ impl ActionAtom {
         Ok(())
     }
 
+    pub fn add_bugpoint_action(&mut self, frame: u64) -> Result<(), AtomError> {
+        let previous_frame = self.actions.last().map(|a| a.frame).unwrap_or(0);
+        let delta = frame - previous_frame;
+        self.actions.push(Action::bugpoint(previous_frame, delta));
+        Ok(())
+    }
+
     pub fn clear(&mut self) {
         self.actions.clear();
     }

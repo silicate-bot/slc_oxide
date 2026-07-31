@@ -205,6 +205,7 @@ impl<M: Meta> Replay<M> {
                         ActionType::RestartFull => InputData::RestartFull,
                         ActionType::Death => InputData::Death,
                         ActionType::TPS => InputData::TPS(action.tps),
+                        ActionType::Bugpoint => InputData::Skip,
                         ActionType::Reserved => InputData::Skip,
                     };
 
