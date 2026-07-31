@@ -47,7 +47,7 @@ pub enum ReplayError {
 }
 
 impl Replay {
-    const HEADER: [u8; 8] = [b'S', b'L', b'C', b'3', b'R', b'P', b'L', b'Y'];
+    const HEADER: [u8; 8] = *b"SLC3RPLY";
     const FOOTER: u8 = 0xCC;
 
     pub fn new(metadata: Metadata) -> Self {

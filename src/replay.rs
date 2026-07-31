@@ -76,11 +76,15 @@ pub enum ReplayError {
     Blob(#[from] crate::blob::BlobError),
     #[error("V3 error: {0}")]
     V3Error(#[from] crate::v3::replay::ReplayError),
+    #[error("V3 atom error: {0}")]
+    V3AtomError(#[from] crate::v3::atom::AtomError),
+    #[error("Invalid player button for v3 conversion: {0}")]
+    InvalidV3PlayerButton(u8),
 }
 
 pub const V2_HEADER: [u8; 4] = [0x53, 0x49, 0x4C, 0x4C];
 pub const V2_FOOTER: [u8; 3] = [0x45, 0x4F, 0x4D];
-pub const V3_HEADER: [u8; 8] = [b'S', b'L', b'C', b'3', b'R', b'P', b'L', b'Y'];
+pub const V3_HEADER: [u8; 8] = *b"SLC3RPLY";
 
 impl<M: Meta> Replay<M> {
     /// Create a new slc replay with the specified tps and meta.
@@ -182,7 +186,8 @@ impl<M: Meta> Replay<M> {
 
         let v3_replay = crate::v3::Replay::read(reader)?;
 
-        let mut replay = Self::new(v3_replay.metadata.tps, M::from_bytes(&[]));
+        let empty_meta = vec![0u8; M::size() as usize];
+        let mut replay = Self::new(v3_replay.metadata.tps, M::from_bytes(&empty_meta));
 
         for atom in &v3_replay.atoms.atoms {
             if let AtomVariant::Action(action_atom) = atom {
@@ -330,29 +335,21 @@ impl<M: Meta> Replay<M> {
                         1 => ActionType::Jump,
                         2 => ActionType::Left,
                         3 => ActionType::Right,
-                        _ => continue,
+                        _ => return Err(ReplayError::InvalidV3PlayerButton(p.button)),
                     };
-                    action_atom
-                        .add_player_action(input.frame, action_type, p.hold, p.player_2)
-                        .ok();
+                    action_atom.add_player_action(input.frame, action_type, p.hold, p.player_2)?;
                 }
                 InputData::Restart => {
-                    action_atom
-                        .add_death_action(input.frame, ActionType::Restart, 0)
-                        .ok();
+                    action_atom.add_death_action(input.frame, ActionType::Restart, 0)?;
                 }
                 InputData::RestartFull => {
-                    action_atom
-                        .add_death_action(input.frame, ActionType::RestartFull, 0)
-                        .ok();
+                    action_atom.add_death_action(input.frame, ActionType::RestartFull, 0)?;
                 }
                 InputData::Death => {
-                    action_atom
-                        .add_death_action(input.frame, ActionType::Death, 0)
-                        .ok();
+                    action_atom.add_death_action(input.frame, ActionType::Death, 0)?;
                 }
                 InputData::TPS(tps) => {
-                    action_atom.add_tps_action(input.frame, *tps).ok();
+                    action_atom.add_tps_action(input.frame, *tps)?;
                 }
                 InputData::Skip => {}
             }
