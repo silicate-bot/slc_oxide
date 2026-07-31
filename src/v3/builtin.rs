@@ -6,14 +6,12 @@ use super::section::{largest_power_of_two, Section};
 
 pub struct ActionAtom {
     pub actions: Vec<Action>,
-    size: usize,
 }
 
 impl ActionAtom {
     pub fn new() -> Self {
         Self {
             actions: Vec::new(),
-            size: 0,
         }
     }
 
@@ -24,8 +22,22 @@ impl ActionAtom {
         holding: bool,
         player2: bool,
     ) -> Result<(), AtomError> {
+        if !matches!(
+            action_type,
+            ActionType::Jump | ActionType::Left | ActionType::Right
+        ) {
+            return Err(AtomError::InvalidActionType(action_type));
+        }
         let previous_frame = self.actions.last().map(|a| a.frame).unwrap_or(0);
-        let delta = frame - previous_frame;
+        let delta = frame
+            .checked_sub(previous_frame)
+            .ok_or(AtomError::NonMonotonicFrame {
+                previous: previous_frame,
+                frame,
+            })?;
+        if delta > (u64::MAX >> 4) {
+            return Err(AtomError::PlayerDeltaTooLarge(delta));
+        }
         self.actions.push(Action::player(
             previous_frame,
             delta,
@@ -42,16 +54,35 @@ impl ActionAtom {
         action_type: ActionType,
         seed: u64,
     ) -> Result<(), AtomError> {
+        if !matches!(
+            action_type,
+            ActionType::Restart | ActionType::RestartFull | ActionType::Death
+        ) {
+            return Err(AtomError::InvalidActionType(action_type));
+        }
         let previous_frame = self.actions.last().map(|a| a.frame).unwrap_or(0);
-        let delta = frame - previous_frame;
+        let delta = frame
+            .checked_sub(previous_frame)
+            .ok_or(AtomError::NonMonotonicFrame {
+                previous: previous_frame,
+                frame,
+            })?;
         self.actions
             .push(Action::death(previous_frame, delta, action_type, seed));
         Ok(())
     }
 
     pub fn add_tps_action(&mut self, frame: u64, tps: f64) -> Result<(), AtomError> {
+        if !tps.is_finite() || tps <= 0.0 {
+            return Err(AtomError::InvalidTPS(tps));
+        }
         let previous_frame = self.actions.last().map(|a| a.frame).unwrap_or(0);
-        let delta = frame - previous_frame;
+        let delta = frame
+            .checked_sub(previous_frame)
+            .ok_or(AtomError::NonMonotonicFrame {
+                previous: previous_frame,
+                frame,
+            })?;
         self.actions
             .push(Action::tps_change(previous_frame, delta, tps));
         Ok(())
@@ -59,7 +90,12 @@ impl ActionAtom {
 
     pub fn add_bugpoint_action(&mut self, frame: u64) -> Result<(), AtomError> {
         let previous_frame = self.actions.last().map(|a| a.frame).unwrap_or(0);
-        let delta = frame - previous_frame;
+        let delta = frame
+            .checked_sub(previous_frame)
+            .ok_or(AtomError::NonMonotonicFrame {
+                previous: previous_frame,
+                frame,
+            })?;
         self.actions.push(Action::bugpoint(previous_frame, delta));
         Ok(())
     }
@@ -96,6 +132,8 @@ impl ActionAtom {
         actions: &mut [Action],
         sections: &mut Vec<Section>,
     ) -> Result<(), AtomError> {
+        Self::validate_actions(actions)?;
+
         let mut i = 0;
         while i < actions.len() {
             if !actions[i].is_player() {
@@ -105,7 +143,6 @@ impl ActionAtom {
                 continue;
             }
 
-            let mut count = 1;
             let mut pure_count = 1;
             let mut swifts = 0;
             let mut pure_swifts = 0;
@@ -114,7 +151,6 @@ impl ActionAtom {
 
             while Self::can_join(actions, pure_count, i) {
                 i += 1;
-                count += 1;
 
                 if Self::swift_compatible(actions, i) {
                     actions[i - 1].swift = true;
@@ -129,7 +165,7 @@ impl ActionAtom {
                 }
             }
 
-            count = largest_power_of_two(pure_count);
+            let count = largest_power_of_two(pure_count);
             i = start + count + pure_swifts;
 
             let mut section = Section::player_from_range(actions, start, i);
@@ -141,27 +177,62 @@ impl ActionAtom {
 
         Ok(())
     }
+
+    fn validate_actions(actions: &[Action]) -> Result<(), AtomError> {
+        let mut previous_frame = 0;
+
+        for action in actions {
+            let expected_delta =
+                action
+                    .frame
+                    .checked_sub(previous_frame)
+                    .ok_or(AtomError::NonMonotonicFrame {
+                        previous: previous_frame,
+                        frame: action.frame,
+                    })?;
+
+            if action.delta() != expected_delta {
+                return Err(AtomError::InconsistentFrameDelta {
+                    expected: expected_delta,
+                    actual: action.delta(),
+                });
+            }
+            if action.is_player() && action.delta() > (u64::MAX >> 4) {
+                return Err(AtomError::PlayerDeltaTooLarge(action.delta()));
+            }
+            if action.action_type == ActionType::TPS
+                && (!action.tps.is_finite() || action.tps <= 0.0)
+            {
+                return Err(AtomError::InvalidTPS(action.tps));
+            }
+
+            previous_frame = action.frame;
+        }
+
+        Ok(())
+    }
 }
 
 impl Atom for ActionAtom {
     const ID: AtomId = AtomId::Action;
 
-    fn size(&self) -> usize {
-        self.size
-    }
-
     fn read<R: Read>(reader: &mut R, size: usize) -> Result<Self, AtomError> {
-        let mut buf8 = [0u8; 8];
-        reader.read_exact(&mut buf8)?;
-        let count = u64::from_le_bytes(buf8) as usize;
-
-        let mut actions = Vec::with_capacity(count);
-
-        while actions.len() < count {
-            Section::read(reader, &mut actions)?;
+        if size < 8 {
+            return Err(AtomError::ActionAtomTooSmall);
         }
 
-        Ok(Self { actions, size })
+        let mut buf8 = [0u8; 8];
+        reader.read_exact(&mut buf8)?;
+        let count =
+            usize::try_from(u64::from_le_bytes(buf8)).map_err(|_| AtomError::AtomTooLarge)?;
+
+        let mut actions = Vec::with_capacity(count.min(4096));
+
+        while actions.len() < count {
+            Section::read(reader, &mut actions, count)?;
+        }
+
+        Ok(Self { actions })
     }
 
     fn write<W: Write>(&self, writer: &mut W) -> Result<(), AtomError> {

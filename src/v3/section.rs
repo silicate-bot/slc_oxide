@@ -26,6 +26,12 @@ pub enum SectionError {
     InvalidIdentifier,
     #[error("Invalid button type")]
     InvalidButton,
+    #[error("Section expands beyond the declared action count")]
+    ActionCountExceeded,
+    #[error("Action frame overflow")]
+    FrameOverflow,
+    #[error("Invalid TPS value: {0}")]
+    InvalidTPS(f64),
 }
 
 #[repr(u8)]
@@ -86,9 +92,11 @@ impl PlayerInput {
         }
     }
 
-    pub fn from_state(prev_frame: u64, state: u64) -> Self {
+    pub fn from_state(prev_frame: u64, state: u64) -> Result<Self, SectionError> {
         let delta = state >> 4;
-        let frame = prev_frame + delta;
+        let frame = prev_frame
+            .checked_add(delta)
+            .ok_or(SectionError::FrameOverflow)?;
         let button_val = (state >> 2) & 0b11;
         let button = match button_val {
             0 => Button::Swift,
@@ -100,13 +108,13 @@ impl PlayerInput {
         let holding = (state & 0b1) == 0b1;
         let player2 = (state & 0b10) == 0b10;
 
-        Self {
+        Ok(Self {
             frame,
             delta,
             button,
             holding,
             player2,
-        }
+        })
     }
 
     pub fn prepare_state(&self, byte_size: u8) -> u64 {
@@ -173,6 +181,10 @@ impl Section {
     }
 
     pub fn special(action: &Action) -> Result<Self, SectionError> {
+        if action.action_type == ActionType::TPS && (!action.tps.is_finite() || action.tps <= 0.0) {
+            return Err(SectionError::InvalidTPS(action.tps));
+        }
+
         let special_type = match action.action_type {
             ActionType::TPS => SpecialType::TPS,
             ActionType::Death => SpecialType::Death,
@@ -297,7 +309,11 @@ impl Section {
         new_sections
     }
 
-    pub fn read<R: Read>(reader: &mut R, actions: &mut Vec<Action>) -> Result<(), SectionError> {
+    pub fn read<R: Read>(
+        reader: &mut R,
+        actions: &mut Vec<Action>,
+        max_actions: usize,
+    ) -> Result<(), SectionError> {
         let mut buf2 = [0u8; 2];
         reader.read_exact(&mut buf2)?;
         let initial_header = u16::from_le_bytes(buf2);
@@ -322,7 +338,9 @@ impl Section {
 
                 for _ in 0..length {
                     let state = read_n_bytes(reader, byte_size as usize)?;
-                    let p = PlayerInput::from_state(previous_frame, state);
+                    let p = PlayerInput::from_state(previous_frame, state)?;
+                    let added_actions = if p.button == Button::Swift { 2 } else { 1 };
+                    ensure_action_capacity(actions.len(), added_actions, max_actions)?;
 
                     if p.button == Button::Swift {
                         actions.push(Action::player(
@@ -374,14 +392,27 @@ impl Section {
 
                 for _ in 0..length {
                     let state = read_n_bytes(reader, byte_size as usize)?;
-                    let p = PlayerInput::from_state(prev_input_frame, state);
+                    let p = PlayerInput::from_state(prev_input_frame, state)?;
                     prev_input_frame = p.frame;
                     inputs.push(p);
                 }
 
+                let actions_per_repeat = inputs.iter().try_fold(0usize, |count, input| {
+                    count.checked_add(if input.button == Button::Swift { 2 } else { 1 })
+                });
+                let repeats =
+                    usize::try_from(repeats).map_err(|_| SectionError::ActionCountExceeded)?;
+                let added_actions = actions_per_repeat
+                    .and_then(|count| count.checked_mul(repeats))
+                    .ok_or(SectionError::ActionCountExceeded)?;
+                ensure_action_capacity(actions.len(), added_actions, max_actions)?;
+
                 for _ in 0..repeats {
                     let mut previous_frame = actions.last().map(|a| a.frame).unwrap_or(0);
                     for p in &inputs {
+                        previous_frame
+                            .checked_add(p.delta)
+                            .ok_or(SectionError::FrameOverflow)?;
                         if p.button == Button::Swift {
                             actions.push(Action::player(
                                 previous_frame,
@@ -426,6 +457,10 @@ impl Section {
                 let frame_delta = read_n_bytes(reader, byte_size as usize)?;
 
                 let current_frame = actions.last().map(|a| a.frame).unwrap_or(0);
+                current_frame
+                    .checked_add(frame_delta)
+                    .ok_or(SectionError::FrameOverflow)?;
+                ensure_action_capacity(actions.len(), 1, max_actions)?;
 
                 let special_type = match special_type {
                     0 => SpecialType::Restart,
@@ -441,6 +476,9 @@ impl Section {
                         let mut buf8 = [0u8; 8];
                         reader.read_exact(&mut buf8)?;
                         let tps = f64::from_le_bytes(buf8);
+                        if !tps.is_finite() || tps <= 0.0 {
+                            return Err(SectionError::InvalidTPS(tps));
+                        }
                         actions.push(Action::tps_change(current_frame, frame_delta, tps));
                     }
                     SpecialType::Restart | SpecialType::RestartFull | SpecialType::Death => {
@@ -517,6 +555,21 @@ impl Section {
 
         Ok(())
     }
+}
+
+fn ensure_action_capacity(
+    current: usize,
+    additional: usize,
+    maximum: usize,
+) -> Result<(), SectionError> {
+    if current
+        .checked_add(additional)
+        .is_none_or(|total| total > maximum)
+    {
+        return Err(SectionError::ActionCountExceeded);
+    }
+
+    Ok(())
 }
 
 fn distribute_inputs_to_sections(
