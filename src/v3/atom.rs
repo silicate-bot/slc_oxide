@@ -1,4 +1,4 @@
-use std::io::{Read, Seek, Write};
+use std::io::{Cursor, Read, Seek, Write};
 use thiserror::Error;
 
 #[repr(u32)]
@@ -28,6 +28,24 @@ pub enum AtomError {
     IOError(#[from] std::io::Error),
     #[error("Unknown atom ID: {0}")]
     UnknownAtomId(u32),
+    #[error("Atom body is too large")]
+    AtomTooLarge,
+    #[error("Atom header extends past the replay boundary")]
+    TruncatedAtomHeader,
+    #[error("Atom body extends past the replay boundary")]
+    AtomBodyOutOfBounds,
+    #[error("Action atom is too small to contain its action count")]
+    ActionAtomTooSmall,
+    #[error("Invalid action type for this operation: {0:?}")]
+    InvalidActionType(crate::v3::action::ActionType),
+    #[error("Invalid TPS value: {0}")]
+    InvalidTPS(f64),
+    #[error("Action frame {frame} precedes the previous frame {previous}")]
+    NonMonotonicFrame { previous: u64, frame: u64 },
+    #[error("Player action frame delta is too large: {0}")]
+    PlayerDeltaTooLarge(u64),
+    #[error("Action frame delta is inconsistent: expected {expected}, found {actual}")]
+    InconsistentFrameDelta { expected: u64, actual: u64 },
     #[error("Section error: {0}")]
     SectionError(#[from] crate::v3::section::SectionError),
 }
@@ -35,83 +53,96 @@ pub enum AtomError {
 pub trait Atom: Sized {
     const ID: AtomId;
 
-    fn size(&self) -> usize;
     fn read<R: Read>(reader: &mut R, size: usize) -> Result<Self, AtomError>;
     fn write<W: Write>(&self, writer: &mut W) -> Result<(), AtomError>;
 }
 
-pub struct NullAtom {
-    pub size: usize,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpaqueAtom {
+    pub id: u32,
+    pub flags: u8,
+    pub body: Vec<u8>,
 }
 
-impl Atom for NullAtom {
-    const ID: AtomId = AtomId::Null;
-
-    fn size(&self) -> usize {
-        self.size
-    }
-
-    fn read<R: Read>(reader: &mut R, size: usize) -> Result<Self, AtomError> {
-        let mut buf = vec![0u8; size];
-        reader.read_exact(&mut buf)?;
-        Ok(Self { size })
-    }
-
-    fn write<W: Write>(&self, _writer: &mut W) -> Result<(), AtomError> {
-        Ok(())
+impl OpaqueAtom {
+    pub fn new(id: u32, flags: u8, body: Vec<u8>) -> Self {
+        Self { id, flags, body }
     }
 }
 
 pub enum AtomVariant {
-    Null(NullAtom),
+    Opaque(OpaqueAtom),
     Action(super::builtin::ActionAtom),
 }
 
 impl AtomVariant {
-    pub fn id(&self) -> AtomId {
+    pub fn id(&self) -> u32 {
         match self {
-            AtomVariant::Null(_) => AtomId::Null,
-            AtomVariant::Action(_) => AtomId::Action,
+            AtomVariant::Opaque(a) => a.id,
+            AtomVariant::Action(_) => AtomId::Action as u32,
         }
     }
 
-    pub fn size(&self) -> usize {
-        match self {
-            AtomVariant::Null(a) => a.size(),
-            AtomVariant::Action(a) => a.size(),
-        }
-    }
-
-    pub fn read<R: Read>(reader: &mut R) -> Result<Self, AtomError> {
+    pub fn read<R: Read + Seek>(reader: &mut R, end_pos: u64) -> Result<Self, AtomError> {
         let mut buf = [0u8; 4];
         reader.read_exact(&mut buf)?;
         let id = u32::from_le_bytes(buf);
-        let atom_id = AtomId::try_from(id)?;
 
         let mut buf8 = [0u8; 8];
         reader.read_exact(&mut buf8)?;
-        let size = u64::from_le_bytes(buf8) as usize;
+        let size_and_flags = u64::from_le_bytes(buf8);
+        let flags = (size_and_flags >> 56) as u8;
+        let size_u64 = size_and_flags & 0x00ff_ffff_ffff_ffff;
+        let size = usize::try_from(size_u64).map_err(|_| AtomError::AtomTooLarge)?;
 
-        match atom_id {
-            AtomId::Null => Ok(AtomVariant::Null(NullAtom::read(reader, size)?)),
-            AtomId::Action => Ok(AtomVariant::Action(super::builtin::ActionAtom::read(
-                reader, size,
-            )?)),
-            AtomId::Marker => Ok(AtomVariant::Null(NullAtom::read(reader, size)?)),
+        let body_start = reader.stream_position()?;
+        let remaining = end_pos
+            .checked_sub(body_start)
+            .ok_or(AtomError::AtomBodyOutOfBounds)?;
+        if size_u64 > remaining {
+            return Err(AtomError::AtomBodyOutOfBounds);
+        }
+
+        let mut body = Vec::new();
+        body.try_reserve_exact(size)
+            .map_err(|_| AtomError::AtomTooLarge)?;
+        body.resize(size, 0);
+        reader.read_exact(&mut body)?;
+
+        match id {
+            id if id == AtomId::Action as u32 => {
+                let mut body_reader = Cursor::new(body);
+                Ok(AtomVariant::Action(super::builtin::ActionAtom::read(
+                    &mut body_reader,
+                    size,
+                )?))
+            }
+            _ => Ok(AtomVariant::Opaque(OpaqueAtom::new(id, flags, body))),
         }
     }
 
     pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), AtomError> {
-        let id = self.id() as u32;
+        let mut body = Vec::new();
+        let flags = match self {
+            AtomVariant::Opaque(a) => {
+                body.extend_from_slice(&a.body);
+                a.flags
+            }
+            AtomVariant::Action(a) => {
+                a.write(&mut body)?;
+                0
+            }
+        };
+
+        let id = self.id();
         writer.write_all(&id.to_le_bytes())?;
-
-        let size = self.size() as u64;
-        writer.write_all(&size.to_le_bytes())?;
-
-        match self {
-            AtomVariant::Null(a) => a.write(writer)?,
-            AtomVariant::Action(a) => a.write(writer)?,
+        let size = u64::try_from(body.len()).map_err(|_| AtomError::AtomTooLarge)?;
+        if size > 0x00ff_ffff_ffff_ffff {
+            return Err(AtomError::AtomTooLarge);
         }
+        let size_and_flags = size | (u64::from(flags) << 56);
+        writer.write_all(&size_and_flags.to_le_bytes())?;
+        writer.write_all(&body)?;
 
         Ok(())
     }
@@ -137,10 +168,13 @@ impl AtomRegistry {
     ) -> Result<(), AtomError> {
         loop {
             let current_pos = reader.stream_position()?;
-            if current_pos >= end_pos {
+            if current_pos == end_pos {
                 break;
             }
-            let atom = AtomVariant::read(reader)?;
+            if end_pos.saturating_sub(current_pos) < 12 {
+                return Err(AtomError::TruncatedAtomHeader);
+            }
+            let atom = AtomVariant::read(reader, end_pos)?;
             self.add(atom);
         }
         Ok(())

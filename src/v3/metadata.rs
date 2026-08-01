@@ -9,7 +9,8 @@ pub struct Metadata {
     pub seed: u64,
     pub version: u32,
     pub build: u32,
-    padding: [u8; 40],
+    pub randomness_algorithm: u32,
+    padding: [u8; 36],
 }
 
 impl Metadata {
@@ -17,9 +18,10 @@ impl Metadata {
         Self {
             tps,
             seed,
-            version: 1,
+            version: 2,
             build,
-            padding: [0; 40],
+            randomness_algorithm: 0,
+            padding: [0; 36],
         }
     }
 
@@ -38,7 +40,10 @@ impl Metadata {
         reader.read_exact(&mut buf4)?;
         let build = u32::from_le_bytes(buf4);
 
-        let mut padding = [0u8; 40];
+        reader.read_exact(&mut buf4)?;
+        let randomness_algorithm = u32::from_le_bytes(buf4);
+
+        let mut padding = [0u8; 36];
         reader.read_exact(&mut padding)?;
 
         Ok(Self {
@@ -46,6 +51,7 @@ impl Metadata {
             seed,
             version,
             build,
+            randomness_algorithm,
             padding,
         })
     }
@@ -55,6 +61,7 @@ impl Metadata {
         writer.write_all(&self.seed.to_le_bytes())?;
         writer.write_all(&self.version.to_le_bytes())?;
         writer.write_all(&self.build.to_le_bytes())?;
+        writer.write_all(&self.randomness_algorithm.to_le_bytes())?;
         writer.write_all(&self.padding)?;
         Ok(())
     }
